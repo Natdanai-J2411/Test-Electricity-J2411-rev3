@@ -44,8 +44,8 @@
     <!-- Google Sheet Configuration Notice (Realtime Connection Instruction) -->
     <div class="bg-amber-50 border-b border-amber-200 px-6 py-2.5 text-xs text-amber-800 flex flex-wrap justify-between items-center gap-2">
         <div class="flex items-center gap-2">
-            <span class="inline-block w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-            <span><strong>สถานะการเชื่อมต่อ:</strong> พร้อมเชื่อมต่อ Realtime API ผ่าน Google Apps Script Web App (ดูคำแนะนำในแท็บบันทึกข้อมูล)</span>
+            <span id="conn-dot" class="inline-block w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+            <span id="conn-status"><strong>สถานะการเชื่อมต่อ:</strong> พร้อมเชื่อมต่อ Realtime API ผ่าน Google Apps Script Web App (ดูคำแนะนำในแท็บบันทึกข้อมูล)</span>
         </div>
         <div class="flex gap-3">
             <input type="text" id="script-url" placeholder="วางลิงก์ Web App URL ตรงนี้เพื่อเปิดระบบ Realtime..." class="bg-white border border-amber-300 text-gray-700 px-3 py-1 rounded-md text-xs w-64 focus:outline-none focus:ring-1 focus:ring-blue-500">
@@ -379,19 +379,42 @@ function doPost(e) {
 
         // Fetch from real Google Apps Script web app endpoint if provided
         function fetchRealtimeData() {
-            const url = localStorage.getItem('j2411_script_url');
-            if(url) {
-                document.getElementById('script-url').value = url;
-                // Executing a dynamic JSONP or standard Fetch request 
-                fetch(url)
-                .then(res => res.json())
-                .then(response => {
-                    if(response.status === "success" && response.data && response.data.length > 0) {
+            const url = localStorage.getItem('j2411_script_url') || "https://script.google.com/macros/s/AKfycbxoIIhkheO5QjpKNofNqiK0QY8hWy98gIx89jGzGb225duD6DuhSk5spkdvdVVx_0l4vg/exec";
+            if(!url) return;
+            document.getElementById('script-url').value = url;
+            fetch(url)
+            .then(res => res.text())
+            .then(text => {
+                let response;
+                try { response = JSON.parse(text); }
+                catch(parseErr) {
+                    showConnStatus('error', 'เซิร์ฟเวอร์ไม่ได้ส่ง JSON — มักเกิดจากตั้ง Who has access ไม่ใช่ "Anyone" หรือใช้ลิงก์ /dev. คำตอบที่ได้: ' + text.slice(0,100));
+                    return;
+                }
+                if(response.status === "success" && Array.isArray(response.data)) {
+                    if(response.data.length > 0) {
                         rawDatabase = response.data; // replace with live source
                         updateDashboard();
+                        showConnStatus('ok', 'อัปเดตจากชีตแล้ว ' + response.data.length + ' รายการ — เวลา ' + new Date().toLocaleTimeString('th-TH'));
+                    } else {
+                        showConnStatus('warn', 'เชื่อมต่อได้ แต่สคริปต์อ่านข้อมูลได้ 0 รายการ (เช็คชื่อแท็บ/แถวหัวตารางใน Code.gs แล้วรัน _test)');
                     }
-                }).catch(e => console.log("Realtime URL fallback to local engine:", e));
-            }
+                } else {
+                    showConnStatus('error', 'สคริปต์แจ้ง error: ' + (response.message || JSON.stringify(response)));
+                }
+            })
+            .catch(err => {
+                showConnStatus('error', 'เรียก URL ไม่สำเร็จ (CORS/เครือข่าย/ลิงก์ผิด): ' + err.message);
+            });
+        }
+
+        // แสดงสถานะการเชื่อมต่อบนแถบด้านบน
+        function showConnStatus(type, msg) {
+            const el = document.getElementById('conn-status');
+            const dot = document.getElementById('conn-dot');
+            if(el) el.innerHTML = '<strong>สถานะการเชื่อมต่อ:</strong> ' + msg;
+            if(dot) dot.className = 'inline-block w-2 h-2 rounded-full animate-pulse ' +
+                (type === 'ok' ? 'bg-green-500' : type === 'warn' ? 'bg-amber-500' : 'bg-red-500');
         }
 
         // Tab routing navigation
@@ -684,6 +707,8 @@ function doPost(e) {
         window.onload = () => {
             fetchRealtimeData();
             updateDashboard();
+            // ดึงข้อมูลจาก Google Sheets ซ้ำอัตโนมัติทุก 30 วินาที (Realtime polling)
+            setInterval(fetchRealtimeData, 30000);
         };
     </script>
 </body>
